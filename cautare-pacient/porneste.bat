@@ -17,23 +17,35 @@ if not defined PY (
   exit /b 1
 )
 
+"%PY%" -c "import tkinter" >nul 2>&1
+if errorlevel 1 (
+  echo Python nu poate deschide o fereastra.
+  echo Reinstalati Python de la https://www.python.org/downloads/
+  echo si lasati bifat "tcl/tk and IDLE".
+  echo.
+  pause
+  exit /b 1
+)
+
 if not exist ".env" copy /Y ".env.example" ".env" >nul
 
 echo Pregatesc aplicatia...
-"%PY%" -c "import server; raise SystemExit(server.pregateste())"
+"%PY%" -c "import cautare; raise SystemExit(cautare.pregateste())"
 if errorlevel 1 (
   echo.
   pause
   exit /b 1
 )
 
-echo.
-echo Aplicatia porneste.
-echo Deschideti in browser: http://127.0.0.1:8765
-echo Pentru oprire apasati Ctrl+C.
-echo.
+set "PYW="
+where pythonw >nul 2>&1 && set "PYW=pythonw"
+if not defined PYW where pyw >nul 2>&1 && set "PYW=pyw"
 
-start "" cmd /c "timeout /t 2 /nobreak >nul & start http://127.0.0.1:8765"
-"%PY%" -u server.py
-echo.
-pause
+echo Se deschide fereastra Cautare pacient.
+if defined PYW (
+  start "" /D "%~dp0" "%PYW%" "%~dp0cautare.py"
+  exit /b 0
+)
+
+"%PY%" "%~dp0cautare.py"
+if errorlevel 1 pause

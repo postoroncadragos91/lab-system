@@ -1,19 +1,18 @@
 # Căutare pacient
 
-Aplicație pentru căutarea pacienților, pe calculatorul dumneavoastră. Nu cere cont și nu trimite datele în altă parte: pagina se deschide doar local.
+Căutarea se deschide într-o fereastră pe calculatorul dumneavoastră. Nu cere cont și nu deschide un browser.
 
 Pacienții din baza locală sunt fictivi (cod `TEST-…`, IDNP din zerouri, adrese în „Localitate Fictivă”). Nu sunt persoane reale.
 
 ## Pornire pe Windows
 
 1. Copiați tot folderul `cautare-pacient` pe calculator.
-2. Instalați Python 3.10 sau mai nou de la [python.org](https://www.python.org/downloads/). La instalare, bifați **Add python.exe to PATH**.
+2. Instalați Python 3.10 sau mai nou de la [python.org](https://www.python.org/downloads/). La instalare, bifați **Add python.exe to PATH**. Lăsați bifat și **tcl/tk and IDLE** (este bifat din start).
 3. Faceți dublu clic pe `porneste.bat`.
-4. Deschideți în browser adresa: [http://127.0.0.1:8765](http://127.0.0.1:8765)
+
+Se deschide fereastra **Căutare pacient**. Scrieți în casetă. Închideți fereastra când ați terminat.
 
 La prima pornire se creează fișierul `date/pacienti.db`. Ca să reveniți la pacienții de probă, ștergeți acest fișier și porniți din nou.
-
-Pentru oprire, apăsați Ctrl+C în fereastra neagră, apoi închideți-o.
 
 ## Cum funcționează căutarea
 
@@ -29,7 +28,7 @@ Dacă nu completați nimic, rămâne baza locală SQLite.
 
 Pentru serverul laboratorului:
 
-1. Copiați `.env.example` în `.env` ( `porneste.bat` face copia la prima rulare, dacă lipsește).
+1. Copiați `.env.example` în `.env` (`porneste.bat` face copia la prima rulare, dacă lipsește).
 2. Completați valorile, fără spații în jurul lui `=`. Exemplu de formă, nu date reale:
 
 ```
@@ -61,15 +60,15 @@ La pornire, `porneste.bat` instalează driverul potrivit:
 - postgres: `psycopg[binary]`
 - mssql: `pymssql`
 
-După ce modificați `.env`, închideți aplicația și porniți-o din nou. Nu publicați fișierul `.env` și nu puneți în el date de pacienți.
+După ce modificați `.env`, închideți fereastra și porniți din nou. Nu publicați fișierul `.env` și nu puneți în el date de pacienți.
 
-## Pornire aici, din Linux
+## Pornire din Linux
 
 ```
 cd cautare-pacient
-python3 server.py
+python3 cautare.py
 ```
 
-Apoi deschideți [http://127.0.0.1:8765](http://127.0.0.1:8765).
+Se deschide aceeași fereastră. Dacă Python spune că lipsește `tkinter`, instalați pachetul `python3-tk`.
 
-Dacă folosiți baza proprie și porniți cu comanda de mai sus, instalați driverul înainte, de exemplu `python3 -m pip install pymysql`.
+Dacă folosiți baza proprie, instalați driverul înainte, de exemplu `python3 -m pip install pymysql`.

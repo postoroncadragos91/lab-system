@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-"""Căutare pacient: server local, SQLite sau o bază configurată prin variabile."""
+"""Căutare pacient: fereastră pe calculator, SQLite sau o bază configurată prin variabile."""
 
 from __future__ import annotations
 
-import json
 import os
+import queue
 import re
 import sqlite3
 import subprocess
 import sys
-import urllib.parse
+import threading
+import tkinter as tk
+import tkinter.font as tkfont
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "date" / "pacienti.db"
-STATIC_INDEX = ROOT / "static" / "index.html"
-HOST = "127.0.0.1"
-PORT = 8765
 MAX_RESULTS = 100
 
 FIELDS = (
@@ -466,71 +464,29 @@ def pregateste() -> int:
     return 0
 
 
-class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
 
-    def log_message(self, fmt: str, *args: object) -> None:
-        status = args[1] if len(args) > 1 else ""
-        path = urllib.parse.urlparse(self.path).path
-        sys.stderr.write(f"{self.address_string()} {path} {status}\n")
+FIELD_LABELS = (
+    ("cod_pacient", "Cod pacient", True),
+    ("nume", "Nume", False),
+    ("prenume", "Prenume", False),
+    ("data_nasterii", "Data nașterii", False),
+    ("idnp", "IDNP", True),
+    ("sex", "Sex", False),
+    ("telefon", "Telefon", True),
+    ("adresa", "Adresă", False),
+)
 
-    def do_GET(self) -> None:  # noqa: N802
-        parsed = urllib.parse.urlparse(self.path)
-        if parsed.path in ("/", "/index.html"):
-            self._send_file(STATIC_INDEX, "text/html; charset=utf-8")
-            return
-        if parsed.path == "/favicon.ico":
-            self._send_bytes(204, b"", "image/x-icon")
-            return
-        if parsed.path == "/api/cautare":
-            params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-            query = params.get("q", [""])[0]
-            self._search(query)
-            return
-        self._send_bytes(404, "Pagina nu există.".encode("utf-8"), "text/plain; charset=utf-8")
+INSTRUCTION = (
+    "Scrieți codul, numele, prenumele, data nașterii, IDNP, sexul, telefonul sau adresa."
+)
 
-    def do_HEAD(self) -> None:  # noqa: N802
-        if urllib.parse.urlparse(self.path).path in ("/", "/index.html"):
-            body = STATIC_INDEX.read_bytes()
-            self._send_bytes(200, b"", "text/html; charset=utf-8", length=len(body))
-            return
-        self._send_bytes(404, b"", "text/plain; charset=utf-8")
-
-    def _search(self, query: str) -> None:
-        try:
-            payload = search(query)
-            self._send_json(200, payload)
-        except ConfigError as exc:
-            self._send_json(400, {"eroare": str(exc), "pacienti": []})
-        except Exception as exc:
-            message = "Nu m-am putut conecta la baza de date. " + safe_error(exc)
-            print(message, file=sys.stderr)
-            self._send_json(502, {"eroare": message, "pacienti": []})
-
-    def _send_file(self, path: Path, content_type: str) -> None:
-        if not path.is_file():
-            self._send_bytes(500, "Lipsește pagina.".encode("utf-8"), "text/plain; charset=utf-8")
-            return
-        self._send_bytes(200, path.read_bytes(), content_type)
-
-    def _send_json(self, status: int, payload: dict[str, object]) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self._send_bytes(status, body, "application/json; charset=utf-8")
-
-    def _send_bytes(self, status: int, body: bytes, content_type: str, length: int | None = None) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body) if length is None else length))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        if body:
-            self.wfile.write(body)
-
-
-class Server(ThreadingHTTPServer):
-    allow_reuse_address = True
-    daemon_threads = True
+INK = "#17212b"
+MUTED = "#526170"
+LINE = "#d5e0e8"
+PAPER = "#f3f6f8"
+CARD = "#ffffff"
+TEAL = "#0c6b66"
+DANGER = "#8d1d1d"
 
 
 def configure_stdio() -> None:
@@ -544,8 +500,258 @@ def configure_stdio() -> None:
             pass
 
 
+def enable_windows_dpi() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+
+
+def choose_font(mono: bool = False) -> str:
+    families = set(tkfont.families())
+    if mono:
+        options = ("Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Liberation Mono")
+    else:
+        options = ("Segoe UI", "DejaVu Sans", "Liberation Sans", "Noto Sans", "Arial")
+    for name in options:
+        if name in families:
+            return name
+    return "TkFixedFont" if mono else "TkDefaultFont"
+
+
+class App(tk.Tk):
+    def __init__(self, config_error: str = "") -> None:
+        super().__init__()
+        self.title("Căutare pacient")
+        self.geometry("1000x760+80+40")
+        self.minsize(760, 520)
+        self.configure(bg=PAPER)
+        self.font_name = choose_font()
+        self.mono_name = choose_font(mono=True)
+        self.token = 0
+        self.after_id: str | None = None
+        self.results_queue: queue.Queue[tuple[int, dict[str, object], str, str]] = queue.Queue()
+        self.query = tk.StringVar()
+
+        heading = tk.Label(
+            self,
+            text="Căutare pacient",
+            bg=PAPER,
+            fg=INK,
+            font=(self.font_name, 20),
+            anchor="w",
+        )
+        heading.pack(fill="x", padx=24, pady=(18, 8))
+
+        box = tk.Frame(self, bg=CARD, highlightbackground=LINE, highlightthickness=1)
+        box.pack(fill="x", padx=24, pady=(0, 8))
+        tk.Label(
+            box,
+            text="Căutare",
+            bg=CARD,
+            fg=INK,
+            font=(self.font_name, 11, "bold"),
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 4))
+        self.entry = tk.Entry(
+            box,
+            textvariable=self.query,
+            font=(self.font_name, 16),
+            relief="solid",
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground="#b7c6d1",
+            highlightcolor=TEAL,
+            bg=CARD,
+            fg=INK,
+            insertbackground=INK,
+        )
+        self.entry.pack(fill="x", padx=12, pady=(0, 12), ipady=6)
+
+        self.status = tk.Label(
+            self,
+            text=config_error or INSTRUCTION,
+            bg=PAPER,
+            fg=DANGER if config_error else MUTED,
+            font=(self.font_name, 11),
+            anchor="w",
+            justify="left",
+            wraplength=940,
+        )
+        self.status.pack(fill="x", padx=26, pady=(4, 8))
+
+        holder = tk.Frame(self, bg=PAPER)
+        holder.pack(fill="both", expand=True, padx=8, pady=(0, 12))
+        self.canvas = tk.Canvas(holder, bg=PAPER, highlightthickness=0, borderwidth=0)
+        scroll = tk.Scrollbar(holder, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.results = tk.Frame(self.canvas, bg=PAPER)
+        self.results_id = self.canvas.create_window((0, 0), window=self.results, anchor="nw")
+        self.canvas.bind("<Configure>", self._stretch)
+        self.results.bind("<Configure>", lambda _event: self._fit(scroll=False))
+        self.canvas.bind_all("<MouseWheel>", self._wheel)
+        self.canvas.bind_all("<Button-4>", lambda _event: self.canvas.yview_scroll(-3, "units"))
+        self.canvas.bind_all("<Button-5>", lambda _event: self.canvas.yview_scroll(3, "units"))
+
+        self.query.trace_add("write", self._schedule)
+        self.entry.focus_set()
+        self.after(50, self._poll)
+        self.after(200, self._raise)
+
+    def _poll(self) -> None:
+        try:
+            while True:
+                token, payload, error, query = self.results_queue.get_nowait()
+                self._deliver(token, payload, error, query)
+        except queue.Empty:
+            pass
+        try:
+            self.after(50, self._poll)
+        except tk.TclError:
+            return
+
+    def _raise(self) -> None:
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(400, lambda: self.attributes("-topmost", False))
+            self.entry.focus_set()
+        except tk.TclError:
+            pass
+
+    def _stretch(self, event: tk.Event) -> None:
+        self.canvas.itemconfigure(self.results_id, width=event.width)
+        self.status.configure(wraplength=max(280, event.width - 40))
+
+    def _wheel(self, event: tk.Event) -> None:
+        delta = getattr(event, "delta", 0)
+        if delta:
+            self.canvas.yview_scroll(int(-delta / 120) or (-1 if delta > 0 else 1), "units")
+
+    def _fit(self, scroll: bool = True) -> None:
+        self.results.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        if scroll:
+            self.canvas.yview_moveto(0)
+
+    def _schedule(self, *_args: object) -> None:
+        if self.after_id is not None:
+            self.after_cancel(self.after_id)
+        self.after_id = self.after(120, self._run)
+
+    def _run(self) -> None:
+        self.after_id = None
+        query = self.query.get()
+        self.token += 1
+        token = self.token
+        if not query.strip() or not like_text(query).strip():
+            self.render({"pacienti": [], "limita": False}, "", "")
+            return
+        self.status.configure(text="Se caută…", fg=MUTED)
+        threading.Thread(target=self._worker, args=(query, token), daemon=True).start()
+
+    def _worker(self, query: str, token: int) -> None:
+        error = ""
+        payload: dict[str, object] = {"pacienti": [], "limita": False}
+        try:
+            payload = search(query)
+        except ConfigError as exc:
+            error = str(exc)
+        except Exception as exc:
+            error = "Nu m-am putut conecta la baza de date. " + safe_error(exc)
+            print(error, file=sys.stderr)
+        self.results_queue.put((token, payload, error, query))
+
+    def _deliver(self, token: int, payload: dict[str, object], error: str, query: str) -> None:
+        try:
+            alive = bool(self.winfo_exists())
+        except tk.TclError:
+            return
+        if not alive or token != self.token:
+            return
+        self.render(payload, error, query)
+
+    def render(self, payload: dict[str, object], error: str, query: str) -> None:
+        for child in self.results.winfo_children():
+            child.destroy()
+        if error:
+            self.status.configure(text=error, fg=DANGER)
+            self._fit()
+            return
+        if not query.strip():
+            self.status.configure(text=INSTRUCTION, fg=MUTED)
+            self._fit()
+            return
+        patients = list(payload.get("pacienti") or [])
+        if not patients:
+            self.status.configure(text="Niciun pacient găsit.", fg=MUTED)
+            self._fit()
+            return
+        count = len(patients)
+        message = "1 pacient găsit." if count == 1 else f"{count} pacienți găsiți."
+        if payload.get("limita"):
+            message += " Sunt afișați primii 100. Continuați să scrieți pentru a restrânge lista."
+        self.status.configure(text=message, fg=MUTED)
+        for patient in patients:
+            self._card(patient)
+        self._fit()
+
+    def _card(self, patient: dict[str, str]) -> None:
+        card = tk.Frame(self.results, bg=CARD, highlightbackground=LINE, highlightthickness=1)
+        card.pack(fill="x", padx=16, pady=6)
+        places = (
+            ("cod_pacient", 0, 0),
+            ("nume", 0, 2),
+            ("prenume", 1, 0),
+            ("data_nasterii", 1, 2),
+            ("idnp", 2, 0),
+            ("sex", 2, 2),
+            ("telefon", 3, 0),
+            ("adresa", 4, 0),
+        )
+        labels = {key: (label, mono) for key, label, mono in FIELD_LABELS}
+        for key, row, column in places:
+            label, mono = labels[key]
+            tk.Label(
+                card,
+                text=label,
+                bg=CARD,
+                fg=MUTED,
+                font=(self.font_name, 10),
+                anchor="w",
+            ).grid(row=row, column=column, sticky="nw", padx=(14, 8), pady=7)
+            tk.Label(
+                card,
+                text=patient.get(key, ""),
+                bg=CARD,
+                fg=INK,
+                font=(self.mono_name if mono else self.font_name, 12),
+                anchor="w",
+                justify="left",
+                wraplength=760 if key == "adresa" else 300,
+            ).grid(
+                row=row,
+                column=column + 1,
+                columnspan=3 if key == "adresa" else 1,
+                sticky="ew",
+                padx=(0, 14),
+                pady=7,
+            )
+        card.grid_columnconfigure(0, minsize=120)
+        card.grid_columnconfigure(1, weight=1)
+        card.grid_columnconfigure(2, minsize=120)
+        card.grid_columnconfigure(3, weight=1)
+
+
 def main() -> int:
     configure_stdio()
+    enable_windows_dpi()
     load_env()
     config = None
     config_error = ""
@@ -559,21 +765,10 @@ def main() -> int:
     elif config is not None:
         print(f"Căutare în tabelul {config.table} pe {config.host} ({config.driver}).")
     else:
-        print("Configurația bazei este incompletă. Căutarea va arăta eroarea în pagină.")
+        print("Configurația bazei este incompletă. Căutarea va arăta eroarea în fereastră.")
         print(config_error)
-    try:
-        httpd = Server((HOST, PORT), Handler)
-    except OSError as exc:
-        print(f"Nu pot porni pe http://{HOST}:{PORT}. ({exc})")
-        return 1
-    print(f"Deschideți în browser: http://{HOST}:{PORT}")
-    print("Oprire: Ctrl+C")
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nOprit.")
-    finally:
-        httpd.server_close()
+    app = App(config_error)
+    app.mainloop()
     return 0
 
 
