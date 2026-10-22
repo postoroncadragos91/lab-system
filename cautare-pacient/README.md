@@ -6,11 +6,23 @@ Pacienții din baza locală sunt fictivi (cod `TEST-…`, IDNP din zerouri, adre
 
 ## Pornire pe Windows
 
-1. Copiați tot folderul `cautare-pacient` pe calculator.
-2. Instalați Python 3.10 sau mai nou de la [python.org](https://www.python.org/downloads/). La instalare, bifați **Add python.exe to PATH**. Lăsați bifat și **tcl/tk and IDLE** (este bifat din start).
-3. Faceți dublu clic pe `porneste.bat`.
+1. Înainte să extrageți arhiva: clic dreapta pe fișierul zip → **Proprietăți** → bifați **Deblocare** (Unblock) → **OK**. Abia după aceea extrageți.
+2. Instalați Python 3.10 sau mai nou de la [python.org](https://www.python.org/downloads/), dacă nu este deja. La instalare, bifați **Add python.exe to PATH** și lăsați bifat **tcl/tk and IDLE**.
+3. În folderul `cautare-pacient`, scrieți `cmd` în bara de adresă și apăsați Enter, apoi rulați:
+
+```
+pyw cautare.py
+```
+
+Dacă `pyw` nu este găsit, rulați:
+
+```
+pythonw cautare.py
+```
 
 Se deschide fereastra **Căutare pacient**. Scrieți în casetă. Închideți fereastra când ați terminat.
+
+`porneste.bat` rămâne în folder pentru calculatoarele fără Smart App Control. Pornirea este comanda `pyw` de mai sus.
 
 La prima pornire se creează fișierul `date/pacienti.db`. Ca să reveniți la pacienții de probă, ștergeți acest fișier și porniți din nou.
 
@@ -28,7 +40,7 @@ Dacă nu completați nimic, rămâne baza locală SQLite.
 
 Pentru serverul laboratorului:
 
-1. Copiați `.env.example` în `.env` (`porneste.bat` face copia la prima rulare, dacă lipsește).
+1. Copiați `.env.example` în `.env`.
 2. Completați valorile, fără spații în jurul lui `=`. Exemplu de formă, nu date reale:
 
 ```
@@ -54,11 +66,13 @@ COL_ADRESA=adresa
 
 Dacă `DB_TABLE` este completat, căutarea merge în acel tabel, nu în SQLite. Numele de tabel poate fi `tabel` sau `schema.tabel`. IDNP-ul și telefonul trebuie să fie coloane text, ca să nu se piardă zerourile din față.
 
-La pornire, `porneste.bat` instalează driverul potrivit:
+Înainte de prima căutare în baza proprie, instalați driverul:
 
-- mysql: `pymysql`
-- postgres: `psycopg[binary]`
-- mssql: `pymssql`
+- mysql: `py -m pip install pymysql`
+- postgres: `py -m pip install "psycopg[binary]"`
+- mssql: `py -m pip install pymssql`
+
+Dacă `py` nu este găsit, înlocuiți-l cu `python`.
 
 După ce modificați `.env`, închideți fereastra și porniți din nou. Nu publicați fișierul `.env` și nu puneți în el date de pacienți.
 
